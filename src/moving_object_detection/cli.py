@@ -22,6 +22,25 @@ def parse_args():
     return p.parse_args()
 
 
+def _download_drive_file(url: str, output: str) -> str:
+    """
+    Download a public Google Drive file with current gdown APIs.
+
+    gdown >= 6 removed the old fuzzy=True argument and now extracts the
+    file ID from standard Google Drive share links automatically.
+    """
+    try:
+        result = gdown.download(url=url, output=output, quiet=False)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to download input video from Google Drive: {exc}"
+        ) from exc
+
+    if not result:
+        raise RuntimeError("Failed to download input video from Google Drive")
+    return str(result)
+
+
 def main():
     args = parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
@@ -34,9 +53,7 @@ def main():
         cache_dir = Path("data")
         cache_dir.mkdir(parents=True, exist_ok=True)
         input_path = str(cache_dir / "input_video.mp4")
-        result = gdown.download(url=drive_url, output=input_path, quiet=False, fuzzy=True)
-        if result is None:
-            raise RuntimeError("Failed to download input video from Google Drive")
+        input_path = _download_drive_file(drive_url, input_path)
 
     outputs = process_video(input_path, args.output_dir, cfg)
     print("\nOutputs:")
