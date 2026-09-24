@@ -6,7 +6,7 @@ torch_compile: false
 flow:
   backend: sea_raft
   model: sea_raft_m
-  checkpoint: mixed
+  checkpoint: spring
   analysis_max_side: 1920
   bidirectional: true
   batch_pairs: auto
