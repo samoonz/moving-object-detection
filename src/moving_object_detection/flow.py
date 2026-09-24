@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
+import warnings
 
 import cv2
 import numpy as np
@@ -9,10 +10,14 @@ import torch
 import torch.nn.functional as F
 
 
+SEA_RAFT_CHECKPOINTS = ("tartan", "chairs", "things", "sintel", "kitti", "spring")
+SEA_RAFT_DEFAULT_CHECKPOINT = "spring"
+
+
 @dataclass
 class FlowConfig:
     model: str = "sea_raft_m"
-    checkpoint: str = "mixed"
+    checkpoint: str = SEA_RAFT_DEFAULT_CHECKPOINT
     precision: str = "fp16"
     allow_tf32: bool = True
     torch_compile: bool = False
@@ -34,7 +39,25 @@ class SEAFlowEstimator:
         torch.backends.cudnn.allow_tf32 = bool(cfg.allow_tf32)
         torch.backends.cudnn.benchmark = True
 
-        self.model = ptlflow.get_model(cfg.model, cfg.checkpoint).to(self.device).eval()
+        checkpoint = cfg.checkpoint
+        try:
+            self.model = ptlflow.get_model(cfg.model, checkpoint)
+        except ValueError as exc:
+            message = str(exc)
+            if "Invalid checkpoint name" not in message:
+                raise
+            warnings.warn(
+                f"PTLFlow rejected checkpoint {checkpoint!r}. "
+                f"Falling back to {SEA_RAFT_DEFAULT_CHECKPOINT!r}. "
+                f"Known SEA-RAFT checkpoints: {', '.join(SEA_RAFT_CHECKPOINTS)}"
+            )
+            checkpoint = SEA_RAFT_DEFAULT_CHECKPOINT
+            self.model = ptlflow.get_model(cfg.model, checkpoint)
+
+        self.checkpoint = checkpoint
+        self.model = self.model.to(self.device).eval()
+        print(f"Loaded PTLFlow model={cfg.model} checkpoint={self.checkpoint}")
+
         if hasattr(self.model, "args") and hasattr(self.model.args, "use_tile_input"):
             self.model.args.use_tile_input = False
 
