@@ -4,9 +4,30 @@ Phát hiện **chuyển động độc lập với camera**, không nhận dạn
 
 ## Thiết kế mặc định
 
-Pipeline:
+### FAST profile (mặc định)
 
-1. **SEA-RAFT** (`sea_raft_m`, pretrained `mixed`) tính dense optical flow trên GPU.
+`./run.sh` dùng pipeline nhẹ:
+
+1. Shi-Tomasi features phân bố theo lưới.
+2. Pyramidal Lucas-Kanade + forward/backward filtering.
+3. MAGSAC fit 1-2 homography background có độ phủ không gian lớn.
+4. Warp background theo camera motion.
+5. Photometric residual + gradient residual, có bù exposure toàn cục.
+6. Median/MAD threshold + morphology + connected components.
+
+Pipeline này không tính dense optical flow toàn frame nên nhẹ hơn rất nhiều và phù hợp khi mục tiêu chỉ là phát hiện vùng chuyển động.
+
+### QUALITY profile (tùy chọn)
+
+SEA-RAFT vẫn được giữ để dùng cho cảnh rất khó:
+
+```bash
+python -m moving_object_detection.cli --config configs/a100_quality.yaml
+```
+
+Quality pipeline:
+
+1. **SEA-RAFT** (`sea_raft_m`, pretrained `spring`) tính dense optical flow trên GPU.
 2. Chạy forward + backward flow cùng batch để tăng utilization và lọc flow lỗi.
 3. Lấy dense correspondences từ optical flow.
 4. Fit đồng thời:
@@ -172,3 +193,33 @@ Homography xử lý camera shake/rotation/zoom rất tốt nhưng có thể tạ
 - Motion dọc chính xác theo epipolar line có thể khó hơn cho Fundamental residual; Homography/fallback và temporal continuity giúp giảm trường hợp này.
 - Motion blur cực mạnh hoặc vật thể chỉ vài pixel vẫn phụ thuộc chất lượng optical flow; tăng `analysis_max_side` khi cần.
 - Đây là motion segmentation, không phải semantic detector. Không cần train class và không phụ thuộc vật thể là người, xe, drone hay vật thể lạ.
+
+
+## Chế độ chạy nhanh
+
+Mặc định:
+
+```bash
+./run.sh
+```
+
+sẽ chạy `configs/a100.yaml` với:
+
+```yaml
+flow:
+  backend: fast
+  analysis_max_side: 1280
+```
+
+Nếu vẫn muốn nhẹ hơn nữa:
+
+```bash
+sed -i 's/analysis_max_side: 1280/analysis_max_side: 960/' configs/a100.yaml
+./run.sh
+```
+
+Nếu cần ưu tiên vật thể rất nhỏ, tăng lên 1600:
+
+```bash
+sed -i 's/analysis_max_side: 1280/analysis_max_side: 1600/' configs/a100.yaml
+```
