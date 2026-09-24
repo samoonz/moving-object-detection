@@ -1,0 +1,10 @@
+numpy>=1.26,<3
+opencv-python-headless>=4.10
+PyYAML>=6.0
+tqdm>=4.66
+gdown>=5.2
+ptlflow>=0.4.2
+huggingface-hub>=0.24
+google-api-python-client>=2.140
+google-auth>=2.34
+google-auth-httplib2>=0.2
