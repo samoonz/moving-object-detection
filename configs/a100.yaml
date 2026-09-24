@@ -9,6 +9,7 @@ flow:
   checkpoint: spring
   analysis_max_side: 1920
   bidirectional: true
+  cudnn_grid_sample_workaround: true
   batch_pairs: auto
 
 geometry:
