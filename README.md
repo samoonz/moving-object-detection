@@ -1,4 +1,4 @@
-# Moving Object Detection — moving camera / camera shake / A100
+# Moving Object Detection — moving camera / camera shake
 
 Phát hiện **chuyển động độc lập với camera**, không nhận dạng class. Project dành cho video có rung camera, pan/tilt/rotation, thay đổi góc nhìn và vật thể thay đổi kích thước mạnh.
 
@@ -7,7 +7,7 @@ Phát hiện **chuyển động độc lập với camera**, không nhận dạn
 Pipeline:
 
 1. **SEA-RAFT** (`sea_raft_m`, pretrained `mixed`) tính dense optical flow trên GPU.
-2. Chạy forward + backward flow cùng batch để tăng utilization A100 và lọc flow lỗi.
+2. Chạy forward + backward flow cùng batch để tăng utilization và lọc flow lỗi.
 3. Lấy dense correspondences từ optical flow.
 4. Fit đồng thời:
    - Homography + MAGSAC: mạnh khi rung/rotation/zoom hoặc cảnh gần phẳng.
@@ -121,7 +121,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=/secure/gdrive-sa.json
 
 Không commit JSON credential lên GitHub. Với My Drive thông thường, ưu tiên `rclone`; service account phù hợp hơn khi folder nằm trong Shared Drive hoặc môi trường đã cấu hình quota/ủy quyền phù hợp.
 
-## Tối ưu A100
+## Tối ưu
 
 Default:
 
@@ -135,10 +135,7 @@ flow:
   batch_pairs: auto
 ```
 
-`batch_pairs: auto` chọn:
-- A100 80 GB: 4 frame-pairs/batch (8 directions khi bidirectional)
-- A100 40 GB: 2 frame-pairs/batch
-- GPU nhỏ hơn: 1
+
 
 Nếu OOM, estimator tự chia batch nhỏ hơn.
 
