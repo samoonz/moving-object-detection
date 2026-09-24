@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.idea/
+.vscode/
+.DS_Store
+outputs/
+data/
+models/
+credentials/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.jsonl
