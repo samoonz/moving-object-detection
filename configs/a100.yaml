@@ -3,16 +3,33 @@ precision: fp16
 allow_tf32: true
 torch_compile: false
 
+# Lightweight default: camera compensation + residual motion.
 flow:
-  backend: sea_raft
-  model: sea_raft_m
-  checkpoint: spring
-  analysis_max_side: 1920
-  bidirectional: true
-  cudnn_grid_sample_workaround: true
-  avoid_cudnn_fallback: true
-  batch_pairs: auto
+  backend: fast
+  analysis_max_side: 1280
+  batch_pairs: 1
 
+fast:
+  feature_rows: 6
+  feature_cols: 10
+  features_per_cell: 30
+  feature_quality: 0.01
+  feature_min_distance: 8
+  lk_win_size: 21
+  lk_max_level: 3
+  fb_max_error: 1.5
+  max_planes: 2
+  min_plane_points: 40
+  secondary_min_coverage: 0.25
+  homography_threshold_px: 1.5
+  magsac_confidence: 0.999
+  residual_floor: 10.0
+  residual_mad_k: 4.0
+  gradient_weight: 0.25
+  valid_erode: 7
+  blur_ksize: 5
+
+# Only used by the SEA-RAFT quality profile.
 geometry:
   sample_stride: 8
   magsac_confidence: 0.999
@@ -28,10 +45,10 @@ geometry:
   fb_consistency_max_px: 8.0
 
 mask:
-  min_component_area_px: 10
-  min_component_area_ratio: 0.000005
+  min_component_area_px: 8
+  min_component_area_ratio: 0.000004
   morph_open: 3
-  morph_close: 7
+  morph_close: 5
   dilate: 3
   bbox_padding: 4
   min_component_score: 1.05
