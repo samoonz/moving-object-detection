@@ -53,7 +53,11 @@ def main():
         cache_dir = Path("data")
         cache_dir.mkdir(parents=True, exist_ok=True)
         input_path = str(cache_dir / "input_video.mp4")
-        input_path = _download_drive_file(drive_url, input_path)
+        cached = Path(input_path)
+        if cached.exists() and cached.stat().st_size > 0:
+            print(f"Using cached input video: {cached} ({cached.stat().st_size / 1024**3:.2f} GiB)")
+        else:
+            input_path = _download_drive_file(drive_url, input_path)
 
     outputs = process_video(input_path, args.output_dir, cfg)
     print("\nOutputs:")
