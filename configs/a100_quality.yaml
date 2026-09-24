@@ -1,0 +1,52 @@
+device: cuda
+precision: fp16
+allow_tf32: true
+torch_compile: false
+
+flow:
+  backend: sea_raft
+  model: sea_raft_m
+  checkpoint: spring
+  analysis_max_side: 1280
+  bidirectional: true
+  cudnn_grid_sample_workaround: true
+  avoid_cudnn_fallback: true
+  batch_pairs: auto
+
+geometry:
+  sample_stride: 8
+  magsac_confidence: 0.999
+  magsac_max_iters: 10000
+  homography_threshold_px: 1.5
+  fundamental_threshold_px: 0.9
+  min_model_inlier_ratio: 0.35
+  homography_strong_inlier_ratio: 0.85
+  prefer_fundamental_margin: 0.05
+  min_residual_px: 1.0
+  adaptive_mad_k: 4.0
+  max_flow_px: 1000.0
+  fb_consistency_max_px: 8.0
+
+mask:
+  min_component_area_px: 10
+  min_component_area_ratio: 0.000005
+  morph_open: 3
+  morph_close: 7
+  dilate: 3
+  bbox_padding: 4
+  min_component_score: 1.05
+
+video:
+  codec: mp4v
+  show_progress: true
+  progress_mininterval: 0.5
+  write_mask_video: true
+  write_overlay_video: true
+  write_jsonl: true
+
+drive:
+  input_url: "https://drive.google.com/file/d/1gVcC5ujuMZ8q5Rdp76WezN6xXQFYY2fk/view?usp=sharing"
+  output_folder_id: "1GvQhEPQ5aPXQGD6JZZyUSHHRQuNuVS4l"
+  auto_upload: false
+  upload_method: rclone
+  rclone_remote: gdrive
