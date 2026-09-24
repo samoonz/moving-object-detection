@@ -60,14 +60,12 @@ def process_video(input_path: str, output_dir: str, cfg: Dict[str, Any]) -> List
             allow_tf32=cfg.get("allow_tf32", True),
             torch_compile=cfg.get("torch_compile", False),
             bidirectional=flow_cfg_raw.get("bidirectional", True),
+            cudnn_grid_sample_workaround=flow_cfg_raw.get(
+                "cudnn_grid_sample_workaround", True
+            ),
         ),
         device=cfg.get("device", "cuda"),
     )
-
-    batch_pairs = flow_cfg_raw.get("batch_pairs", "auto")
-    if batch_pairs == "auto":
-        batch_pairs = auto_batch_pairs()
-    batch_pairs = max(1, int(batch_pairs))
 
     stem = Path(input_path).stem
     overlay_path = output_root / f"{stem}_motion_overlay.mp4"
@@ -86,6 +84,21 @@ def process_video(input_path: str, output_dir: str, cfg: Dict[str, Any]) -> List
 
     max_side = int(flow_cfg_raw.get("analysis_max_side", 1920))
     prev_ana, scale = resize_for_analysis(prev_orig, max_side)
+
+    batch_pairs = flow_cfg_raw.get("batch_pairs", "auto")
+    if batch_pairs == "auto":
+        batch_pairs = auto_batch_pairs(
+            prev_ana.shape[:2],
+            bidirectional=flow_cfg_raw.get("bidirectional", True),
+            precision=cfg.get("precision", "fp16"),
+        )
+    batch_pairs = max(1, int(batch_pairs))
+    print(
+        f"Analysis resolution: {prev_ana.shape[1]}x{prev_ana.shape[0]} | "
+        f"batch_pairs={batch_pairs} | "
+        f"bidirectional={flow_cfg_raw.get('bidirectional', True)}"
+    )
+
     overlay_writer.write(prev_orig)
     mask_writer.write(np.zeros((height, width, 3), dtype=np.uint8))
     log_fp.write(json.dumps({"frame": 0, "boxes": [], "geometry": None}) + "\n")
