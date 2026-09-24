@@ -23,6 +23,7 @@ class FlowConfig:
     torch_compile: bool = False
     bidirectional: bool = True
     cudnn_grid_sample_workaround: bool = True
+    avoid_cudnn_fallback: bool = True
 
 
 def _install_safe_grid_sample() -> None:
@@ -191,6 +192,7 @@ def auto_batch_pairs(
     frame_hw: tuple[int, int] | None = None,
     bidirectional: bool = True,
     precision: str = "fp16",
+    avoid_cudnn_fallback: bool = True,
 ) -> int:
     """
     Pick a batch size from both VRAM and analysis resolution.
@@ -236,4 +238,16 @@ def auto_batch_pairs(
 
     budget_bytes = corr_budget_gb * (1024 ** 3)
     by_resolution = max(1, int(budget_bytes // max(corr_bytes_per_pair, 1)))
-    return max(1, min(hard_cap, by_resolution))
+
+    # PTLFlow SEA-RAFT CorrBlock reshapes its cost volume to
+    # [model_batch * H8 * W8, C, h, w] before grid_sample. PyTorch/cuDNN
+    # grid_sample is problematic once that leading dimension reaches ~65536.
+    # Staying below the limit is usually MUCH faster than taking the
+    # non-cuDNN fallback, even on an A100 with plenty of VRAM.
+    if avoid_cudnn_fallback:
+        directions = 2 if bidirectional else 1
+        cudnn_cap = max(1, 65535 // max(tokens * directions, 1))
+    else:
+        cudnn_cap = hard_cap
+
+    return max(1, min(hard_cap, by_resolution, cudnn_cap))
