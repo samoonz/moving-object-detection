@@ -22,6 +22,50 @@ class FlowConfig:
     allow_tf32: bool = True
     torch_compile: bool = False
     bidirectional: bool = True
+    cudnn_grid_sample_workaround: bool = True
+
+
+def _install_safe_grid_sample() -> None:
+    """
+    Work around PyTorch/cuDNN grid_sample failures for very large effective
+    batch dimensions used by SEA-RAFT's all-pairs correlation sampler.
+
+    PyTorch issue #88380 documents CUDNN_STATUS_NOT_SUPPORTED once the
+    grid_sample batch dimension becomes very large. Making tensors contiguous
+    alone is not sufficient. We keep cuDNN enabled globally and disable it
+    only for the affected grid_sample call.
+    """
+    if getattr(F.grid_sample, "_mod_safe_grid_sample", False):
+        return
+
+    original_grid_sample = F.grid_sample
+
+    def safe_grid_sample(input, grid, mode="bilinear", padding_mode="zeros", align_corners=None):
+        input_c = input.contiguous()
+        grid_c = grid.contiguous()
+
+        # SEA-RAFT reshapes correlation to [B*H*W, C, h, w].
+        # cuDNN grid_sample is known to fail at/above ~65k leading batches.
+        if input_c.is_cuda and input_c.shape[0] >= 65536:
+            with torch.backends.cudnn.flags(enabled=False):
+                return original_grid_sample(
+                    input_c,
+                    grid_c,
+                    mode=mode,
+                    padding_mode=padding_mode,
+                    align_corners=align_corners,
+                )
+
+        return original_grid_sample(
+            input_c,
+            grid_c,
+            mode=mode,
+            padding_mode=padding_mode,
+            align_corners=align_corners,
+        )
+
+    safe_grid_sample._mod_safe_grid_sample = True
+    F.grid_sample = safe_grid_sample
 
 
 class SEAFlowEstimator:
@@ -38,6 +82,9 @@ class SEAFlowEstimator:
         torch.backends.cuda.matmul.allow_tf32 = bool(cfg.allow_tf32)
         torch.backends.cudnn.allow_tf32 = bool(cfg.allow_tf32)
         torch.backends.cudnn.benchmark = True
+
+        if cfg.cudnn_grid_sample_workaround:
+            _install_safe_grid_sample()
 
         checkpoint = cfg.checkpoint
         try:
@@ -140,12 +187,53 @@ class SEAFlowEstimator:
         return fwd, bwd
 
 
-def auto_batch_pairs() -> int:
+def auto_batch_pairs(
+    frame_hw: tuple[int, int] | None = None,
+    bidirectional: bool = True,
+    precision: str = "fp16",
+) -> int:
+    """
+    Pick a batch size from both VRAM and analysis resolution.
+
+    SEA-RAFT's default CorrBlock materializes all-pairs correlation, so memory
+    grows roughly with (H/8 * W/8)^2. A100 capacity alone is therefore not a
+    sufficient batch-size heuristic.
+    """
     if not torch.cuda.is_available():
         return 1
+
     total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+    hard_cap = 4 if total_gb >= 70 else 2 if total_gb >= 35 else 1
+
+    if frame_hw is None:
+        return hard_cap
+
+    h, w = frame_hw
+    h8 = (int(h) + 7) // 8
+    w8 = (int(w) + 7) // 8
+    tokens = h8 * w8
+
+    bytes_per_value = 4 if precision == "fp32" else 2
+    pyramid_factor = 1.34
+    directions = 2 if bidirectional else 1
+
+    corr_bytes_per_pair = (
+        directions
+        * tokens
+        * tokens
+        * bytes_per_value
+        * pyramid_factor
+    )
+
+    # Leave ample room for feature maps, update blocks, decoder state,
+    # optical-flow outputs and CUDA allocator fragmentation.
     if total_gb >= 70:
-        return 4
-    if total_gb >= 35:
-        return 2
-    return 1
+        corr_budget_gb = 24.0
+    elif total_gb >= 35:
+        corr_budget_gb = 12.0
+    else:
+        corr_budget_gb = 4.0
+
+    budget_bytes = corr_budget_gb * (1024 ** 3)
+    by_resolution = max(1, int(budget_bytes // max(corr_bytes_per_pair, 1)))
+    return max(1, min(hard_cap, by_resolution))
