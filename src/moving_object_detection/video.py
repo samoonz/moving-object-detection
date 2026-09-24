@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Tuple
 import cv2
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 
 from .detector import MaskConfig, build_motion_mask
 from .flow import FlowConfig, SEAFlowEstimator, auto_batch_pairs
@@ -63,6 +64,9 @@ def process_video(input_path: str, output_dir: str, cfg: Dict[str, Any]) -> List
             cudnn_grid_sample_workaround=flow_cfg_raw.get(
                 "cudnn_grid_sample_workaround", True
             ),
+            avoid_cudnn_fallback=flow_cfg_raw.get(
+                "avoid_cudnn_fallback", True
+            ),
         ),
         device=cfg.get("device", "cuda"),
     )
@@ -91,12 +95,22 @@ def process_video(input_path: str, output_dir: str, cfg: Dict[str, Any]) -> List
             prev_ana.shape[:2],
             bidirectional=flow_cfg_raw.get("bidirectional", True),
             precision=cfg.get("precision", "fp16"),
+            avoid_cudnn_fallback=flow_cfg_raw.get(
+                "avoid_cudnn_fallback", True
+            ),
         )
     batch_pairs = max(1, int(batch_pairs))
+    feature_tokens = ((prev_ana.shape[0] + 7) // 8) * ((prev_ana.shape[1] + 7) // 8)
+    effective_grid_batch = (
+        batch_pairs
+        * feature_tokens
+        * (2 if flow_cfg_raw.get("bidirectional", True) else 1)
+    )
     print(
         f"Analysis resolution: {prev_ana.shape[1]}x{prev_ana.shape[0]} | "
         f"batch_pairs={batch_pairs} | "
-        f"bidirectional={flow_cfg_raw.get('bidirectional', True)}"
+        f"bidirectional={flow_cfg_raw.get('bidirectional', True)} | "
+        f"grid_batch~{effective_grid_batch:,}"
     )
 
     overlay_writer.write(prev_orig)
@@ -107,6 +121,16 @@ def process_video(input_path: str, output_dir: str, cfg: Dict[str, Any]) -> List
     processed = 0
     geometry_counts: Dict[str, int] = {}
     start = time.perf_counter()
+    total_pairs = max(total_frames - 1, 0) if total_frames > 0 else None
+    progress = tqdm(
+        total=total_pairs,
+        desc="Processing",
+        unit="frame",
+        dynamic_ncols=True,
+        mininterval=float(video_cfg.get("progress_mininterval", 0.5)),
+        disable=not bool(video_cfg.get("show_progress", True)),
+    )
+    batch_index = 0
 
     while True:
         items = []
@@ -125,11 +149,23 @@ def process_video(input_path: str, output_dir: str, cfg: Dict[str, Any]) -> List
             break
 
         pairs = [(a, b) for _, a, b, _ in items]
+        batch_index += 1
+        if batch_index == 1:
+            progress.write(
+                f"Starting first SEA-RAFT inference: "
+                f"{len(items)} pair(s), analysis={prev_ana.shape[1]}x{prev_ana.shape[0]}"
+            )
+
         if torch.cuda.is_available():
             torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+
+        flow_start = time.perf_counter()
         fwd_list, bwd_list = estimator.estimate_pairs(pairs)
+
         if torch.cuda.is_available():
             torch.cuda.synchronize()
+        flow_seconds = time.perf_counter() - flow_start
 
         for j, (idx, _a, _b, current_orig) in enumerate(items):
             bwd = None if bwd_list is None else bwd_list[j]
@@ -177,6 +213,19 @@ def process_video(input_path: str, output_dir: str, cfg: Dict[str, Any]) -> List
             geometry_counts[meta["geometry_model"]] = geometry_counts.get(meta["geometry_model"], 0) + 1
             processed += 1
 
+        progress.update(len(items))
+        elapsed_now = max(time.perf_counter() - start, 1e-9)
+        postfix = {
+            "fps": f"{processed / elapsed_now:.2f}",
+            "flow_s": f"{flow_seconds:.1f}",
+            "batch": len(items),
+        }
+        if torch.cuda.is_available():
+            postfix["vram"] = f"{torch.cuda.memory_allocated() / 1024**3:.1f}G"
+            postfix["peak"] = f"{torch.cuda.max_memory_allocated() / 1024**3:.1f}G"
+        progress.set_postfix(postfix)
+
+    progress.close()
     elapsed = time.perf_counter() - start
     cap.release()
     overlay_writer.release()
