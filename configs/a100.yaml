@@ -10,6 +10,7 @@ flow:
   analysis_max_side: 1920
   bidirectional: true
   cudnn_grid_sample_workaround: true
+  avoid_cudnn_fallback: true
   batch_pairs: auto
 
 geometry:
@@ -37,6 +38,8 @@ mask:
 
 video:
   codec: mp4v
+  show_progress: true
+  progress_mininterval: 0.5
   write_mask_video: true
   write_overlay_video: true
   write_jsonl: true
